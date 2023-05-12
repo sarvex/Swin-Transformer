@@ -20,10 +20,8 @@ def build_optimizer(config, model, simmim=False, is_pretrain=False):
     """
     Build optimizer, set weight decay of normalization to 0 by default.
     """
-    skip = {}
     skip_keywords = {}
-    if hasattr(model, 'no_weight_decay'):
-        skip = model.no_weight_decay()
+    skip = model.no_weight_decay() if hasattr(model, 'no_weight_decay') else {}
     if hasattr(model, 'no_weight_decay_keywords'):
         skip_keywords = model.no_weight_decay_keywords()
     if simmim:
@@ -33,7 +31,10 @@ def build_optimizer(config, model, simmim=False, is_pretrain=False):
             depths = config.MODEL.SWIN.DEPTHS if config.MODEL.TYPE == 'swin' else config.MODEL.SWINV2.DEPTHS
             num_layers = sum(depths)
             get_layer_func = partial(get_swin_layer, num_layers=num_layers + 2, depths=depths)
-            scales = list(config.TRAIN.LAYER_DECAY ** i for i in reversed(range(num_layers + 2)))
+            scales = [
+                config.TRAIN.LAYER_DECAY**i
+                for i in reversed(range(num_layers + 2))
+            ]
             parameters = get_finetune_param_groups(model, config.TRAIN.BASE_LR, config.TRAIN.WEIGHT_DECAY, get_layer_func, scales, skip, skip_keywords)
     else:
         parameters = set_weight_decay(model, skip, skip_keywords)
@@ -74,11 +75,7 @@ def set_weight_decay(model, skip_list=(), skip_keywords=()):
 
 
 def check_keywords_in_name(name, keywords=()):
-    isin = False
-    for keyword in keywords:
-        if keyword in name:
-            isin = True
-    return isin
+    return any(keyword in name for keyword in keywords)
 
 
 def get_pretrain_param_groups(model, skip_list=(), skip_keywords=()):
@@ -109,7 +106,7 @@ def get_swin_layer(name, num_layers, depths):
     elif name.startswith("layers"):
         layer_id = int(name.split('.')[1])
         block_id = name.split('.')[3]
-        if block_id == 'reduction' or block_id == 'norm':
+        if block_id in ['reduction', 'norm']:
             return sum(depths[:layer_id + 1])
         layer_id = sum(depths[:layer_id]) + int(block_id)
         return layer_id + 1
@@ -138,11 +135,7 @@ def get_finetune_param_groups(model, lr, weight_decay, get_layer_func, scales, s
             layer_id = None
 
         if group_name not in parameter_group_names:
-            if scales is not None:
-                scale = scales[layer_id]
-            else:
-                scale = 1.
-
+            scale = scales[layer_id] if scales is not None else 1.
             parameter_group_names[group_name] = {
                 "group_name": group_name,
                 "weight_decay": this_weight_decay,

@@ -28,9 +28,7 @@ def build_model(config, is_pretrain=False):
         layernorm = nn.LayerNorm
 
     if is_pretrain:
-        model = build_simmim(config)
-        return model
-
+        return build_simmim(config)
     if model_type == 'swin':
         model = SwinTransformer(img_size=config.DATA.IMG_SIZE,
                                 patch_size=config.MODEL.SWIN.PATCH_SIZE,

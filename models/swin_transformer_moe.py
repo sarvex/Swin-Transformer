@@ -112,8 +112,11 @@ def window_partition(x, window_size):
     """
     B, H, W, C = x.shape
     x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-    return windows
+    return (
+        x.permute(0, 1, 3, 2, 4, 5)
+        .contiguous()
+        .view(-1, window_size, window_size, C)
+    )
 
 
 def window_reverse(windows, window_size, H, W):
@@ -225,10 +228,7 @@ class WindowAttention(nn.Module):
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
-            attn = self.softmax(attn)
-        else:
-            attn = self.softmax(attn)
-
+        attn = self.softmax(attn)
         attn = self.attn_drop(attn)
 
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
@@ -360,7 +360,9 @@ class SwinTransformerBlock(nn.Module):
             mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
             mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
             attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
-            attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
+            attn_mask = attn_mask.masked_fill(attn_mask != 0, -100.0).masked_fill(
+                attn_mask == 0, 0.0
+            )
         else:
             attn_mask = None
 
@@ -533,32 +535,42 @@ class BasicLayer(nn.Module):
         self.use_checkpoint = use_checkpoint
 
         # build blocks
-        self.blocks = nn.ModuleList([
-            SwinTransformerBlock(dim=dim, input_resolution=input_resolution,
-                                 num_heads=num_heads, window_size=window_size,
-                                 shift_size=0 if (i % 2 == 0) else window_size // 2,
-                                 mlp_ratio=mlp_ratio,
-                                 qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                 drop=drop, attn_drop=attn_drop,
-                                 drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                                 norm_layer=norm_layer,
-                                 mlp_fc2_bias=mlp_fc2_bias,
-                                 init_std=init_std,
-                                 pretrained_window_size=pretrained_window_size,
-
-                                 is_moe=True if i in moe_block else False,
-                                 num_local_experts=num_local_experts,
-                                 top_value=top_value,
-                                 capacity_factor=capacity_factor,
-                                 cosine_router=cosine_router,
-                                 normalize_gate=normalize_gate,
-                                 use_bpr=use_bpr,
-                                 is_gshard_loss=is_gshard_loss,
-                                 gate_noise=gate_noise,
-                                 cosine_router_dim=cosine_router_dim,
-                                 cosine_router_init_t=cosine_router_init_t,
-                                 moe_drop=moe_drop)
-            for i in range(depth)])
+        self.blocks = nn.ModuleList(
+            [
+                SwinTransformerBlock(
+                    dim=dim,
+                    input_resolution=input_resolution,
+                    num_heads=num_heads,
+                    window_size=window_size,
+                    shift_size=0 if (i % 2 == 0) else window_size // 2,
+                    mlp_ratio=mlp_ratio,
+                    qkv_bias=qkv_bias,
+                    qk_scale=qk_scale,
+                    drop=drop,
+                    attn_drop=attn_drop,
+                    drop_path=drop_path[i]
+                    if isinstance(drop_path, list)
+                    else drop_path,
+                    norm_layer=norm_layer,
+                    mlp_fc2_bias=mlp_fc2_bias,
+                    init_std=init_std,
+                    pretrained_window_size=pretrained_window_size,
+                    is_moe=i in moe_block,
+                    num_local_experts=num_local_experts,
+                    top_value=top_value,
+                    capacity_factor=capacity_factor,
+                    cosine_router=cosine_router,
+                    normalize_gate=normalize_gate,
+                    use_bpr=use_bpr,
+                    is_gshard_loss=is_gshard_loss,
+                    gate_noise=gate_noise,
+                    cosine_router_dim=cosine_router_dim,
+                    cosine_router_init_t=cosine_router_init_t,
+                    moe_drop=moe_drop,
+                )
+                for i in range(depth)
+            ]
+        )
 
         # patch merging layer
         if downsample is not None:
@@ -569,10 +581,7 @@ class BasicLayer(nn.Module):
     def forward(self, x):
         l_aux = 0.0
         for blk in self.blocks:
-            if self.use_checkpoint:
-                out = checkpoint.checkpoint(blk, x)
-            else:
-                out = blk(x)
+            out = checkpoint.checkpoint(blk, x) if self.use_checkpoint else blk(x)
             if isinstance(out, tuple):
                 x = out[0]
                 cur_l_aux = out[1]
@@ -588,9 +597,7 @@ class BasicLayer(nn.Module):
         return f"dim={self.dim}, input_resolution={self.input_resolution}, depth={self.depth}"
 
     def flops(self):
-        flops = 0
-        for blk in self.blocks:
-            flops += blk.flops()
+        flops = sum(blk.flops() for blk in self.blocks)
         if self.downsample is not None:
             flops += self.downsample.flops()
         return flops
@@ -621,10 +628,7 @@ class PatchEmbed(nn.Module):
         self.embed_dim = embed_dim
 
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
-        if norm_layer is not None:
-            self.norm = norm_layer(embed_dim)
-        else:
-            self.norm = None
+        self.norm = norm_layer(embed_dim) if norm_layer is not None else None
 
     def forward(self, x):
         B, C, H, W = x.shape
@@ -697,7 +701,7 @@ class SwinTransformerMoE(nn.Module):
                  cosine_router=False, normalize_gate=False, use_bpr=True, is_gshard_loss=True, gate_noise=1.0,
                  cosine_router_dim=256, cosine_router_init_t=0.5, moe_drop=0.0, aux_loss_weight=0.01, **kwargs):
         super().__init__()
-        self._ddp_params_and_buffers_to_ignore = list()
+        self._ddp_params_and_buffers_to_ignore = []
 
         self.num_classes = num_classes
         self.num_layers = len(depths)
@@ -710,7 +714,7 @@ class SwinTransformerMoE(nn.Module):
         self.aux_loss_weight = aux_loss_weight
         self.num_local_experts = num_local_experts
         self.global_experts = num_local_experts * dist.get_world_size() if num_local_experts > 0 \
-            else dist.get_world_size() // (-num_local_experts)
+                else dist.get_world_size() // (-num_local_experts)
         self.sharded_count = (1.0 / num_local_experts) if num_local_experts > 0 else (-num_local_experts)
 
         # split image into non-overlapping patches
@@ -817,7 +821,7 @@ class SwinTransformerMoE(nn.Module):
     def flops(self):
         flops = 0
         flops += self.patch_embed.flops()
-        for i, layer in enumerate(self.layers):
+        for layer in self.layers:
             flops += layer.flops()
         flops += self.num_features * self.patches_resolution[0] * self.patches_resolution[1] // (2 ** self.num_layers)
         flops += self.num_features * self.num_classes

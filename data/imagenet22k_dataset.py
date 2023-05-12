@@ -40,7 +40,7 @@ class IN22KDATASET(data.Dataset):
         idb = self.database[index]
 
         # images
-        images = self._load_image(self.data_path + '/' + idb[0]).convert('RGB')
+        images = self._load_image(f'{self.data_path}/{idb[0]}').convert('RGB')
         if self.transform is not None:
             images = self.transform(images)
 

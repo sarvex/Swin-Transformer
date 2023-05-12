@@ -136,25 +136,24 @@ class SimMIM(nn.Module):
         x_rec = self.decoder(z)
 
         mask = mask.repeat_interleave(self.patch_size, 1).repeat_interleave(self.patch_size, 2).unsqueeze(1).contiguous()
-        
+
         # norm target as prompted
         if self.config.NORM_TARGET.ENABLE:
             x = norm_targets(x, self.config.NORM_TARGET.PATCH_SIZE)
-        
+
         loss_recon = F.l1_loss(x, x_rec, reduction='none')
-        loss = (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
-        return loss
+        return (loss_recon * mask).sum() / (mask.sum() + 1e-5) / self.in_chans
 
     @torch.jit.ignore
     def no_weight_decay(self):
         if hasattr(self.encoder, 'no_weight_decay'):
-            return {'encoder.' + i for i in self.encoder.no_weight_decay()}
+            return {f'encoder.{i}' for i in self.encoder.no_weight_decay()}
         return {}
 
     @torch.jit.ignore
     def no_weight_decay_keywords(self):
         if hasattr(self.encoder, 'no_weight_decay_keywords'):
-            return {'encoder.' + i for i in self.encoder.no_weight_decay_keywords()}
+            return {f'encoder.{i}' for i in self.encoder.no_weight_decay_keywords()}
         return {}
 
 
@@ -204,6 +203,10 @@ def build_simmim(config):
     else:
         raise NotImplementedError(f"Unknown pre-train model: {model_type}")
 
-    model = SimMIM(config=config.MODEL.SIMMIM, encoder=encoder, encoder_stride=encoder_stride, in_chans=in_chans, patch_size=patch_size)
-
-    return model
+    return SimMIM(
+        config=config.MODEL.SIMMIM,
+        encoder=encoder,
+        encoder_stride=encoder_stride,
+        in_chans=in_chans,
+        patch_size=patch_size,
+    )

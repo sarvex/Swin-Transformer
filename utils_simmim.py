@@ -82,13 +82,15 @@ def auto_resume_helper(output_dir, logger):
     checkpoints = os.listdir(output_dir)
     checkpoints = [ckpt for ckpt in checkpoints if ckpt.endswith('pth')]
     logger.info(f"All checkpoints founded in {output_dir}: {checkpoints}")
-    if len(checkpoints) > 0:
-        latest_checkpoint = max([os.path.join(output_dir, d) for d in checkpoints], key=os.path.getmtime)
+    if checkpoints:
+        latest_checkpoint = max(
+            (os.path.join(output_dir, d) for d in checkpoints),
+            key=os.path.getmtime,
+        )
         logger.info(f"The latest checkpoint founded: {latest_checkpoint}")
-        resume_file = latest_checkpoint
+        return latest_checkpoint
     else:
-        resume_file = None
-    return resume_file
+        return None
 
 
 def reduce_tensor(tensor):
@@ -102,22 +104,21 @@ def load_pretrained(config, model, logger):
     logger.info(f">>>>>>>>>> Fine-tuned from {config.MODEL.PRETRAINED} ..........")
     checkpoint = torch.load(config.MODEL.PRETRAINED, map_location='cpu')
     checkpoint_model = checkpoint['model']
-    
-    if any([True if 'encoder.' in k else False for k in checkpoint_model.keys()]):
+
+    if any('encoder.' in k for k in checkpoint_model.keys()):
         checkpoint_model = {k.replace('encoder.', ''): v for k, v in checkpoint_model.items() if k.startswith('encoder.')}
         logger.info('Detect pre-trained model, remove [encoder.] prefix.')
     else:
         logger.info('Detect non-pre-trained model, pass without doing anything.')
 
-    if config.MODEL.TYPE in ['swin', 'swinv2']:
-        logger.info(f">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
-        checkpoint = remap_pretrained_keys_swin(model, checkpoint_model, logger)
-    else:
+    if config.MODEL.TYPE not in ['swin', 'swinv2']:
         raise NotImplementedError
 
+    logger.info(">>>>>>>>>> Remapping pre-trained keys for SWIN ..........")
+    checkpoint = remap_pretrained_keys_swin(model, checkpoint_model, logger)
     msg = model.load_state_dict(checkpoint_model, strict=False)
     logger.info(msg)
-    
+
     del checkpoint
     torch.cuda.empty_cache()
     logger.info(f">>>>>>>>>> loaded successfully '{config.MODEL.PRETRAINED}'")
@@ -125,7 +126,7 @@ def load_pretrained(config, model, logger):
 
 def remap_pretrained_keys_swin(model, checkpoint_model, logger):
     state_dict = model.state_dict()
-    
+
     # Geometric interpolation when pre-trained patch size mismatch with fine-tuned patch size
     all_keys = list(checkpoint_model.keys())
     for key in all_keys:
@@ -172,8 +173,8 @@ def remap_pretrained_keys_swin(model, checkpoint_model, logger):
                     dx = np.arange(-t, t + 0.1, 1.0)
                     dy = np.arange(-t, t + 0.1, 1.0)
 
-                    logger.info("Original positions = %s" % str(x))
-                    logger.info("Target positions = %s" % str(dx))
+                    logger.info(f"Original positions = {str(x)}")
+                    logger.info(f"Target positions = {str(dx)}")
 
                     all_rel_pos_bias = []
 

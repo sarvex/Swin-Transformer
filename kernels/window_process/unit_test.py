@@ -74,8 +74,11 @@ def window_partition(x, window_size):
     """
     B, H, W, C = x.shape
     x = x.view(B, H // window_size, window_size, W // window_size, window_size, C)
-    windows = x.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, C)
-    return windows
+    return (
+        x.permute(0, 1, 3, 2, 4, 5)
+        .contiguous()
+        .view(-1, window_size, window_size, C)
+    )
 
 def window_reverse(windows, window_size, H, W):
     """
@@ -100,24 +103,21 @@ def pyt_forward(x, shift_size, window_size):
         shifted_x = torch.roll(x, shifts=(-shift_size, -shift_size), dims=(1, 2))
     else:
         shifted_x = x
-    # partition windows
-    x_windows = window_partition(shifted_x, window_size)
-    return x_windows
+    return window_partition(shifted_x, window_size)
 
 
 def reverse_pyt_forward(attn_windows, shift_size, window_size, H, W):
     # x in shape(B*nH*nW, window_size, window_size, C)
     shifted_x = window_reverse(attn_windows, window_size, H, W)
-    if shift_size > 0:
-        x = torch.roll(shifted_x, shifts=(shift_size, shift_size), dims=(1, 2))
-    else:
-        x = shifted_x
-    return x
+    return (
+        torch.roll(shifted_x, shifts=(shift_size, shift_size), dims=(1, 2))
+        if shift_size > 0
+        else shifted_x
+    )
 
 
 def copy_one_tensor(input, requires_grad=True):
-    input1 = input.clone().detach().requires_grad_(requires_grad).cuda()
-    return input1
+    return input.clone().detach().requires_grad_(requires_grad).cuda()
 
 class Test_WindowProcess(unittest.TestCase):
     def setUp(self):

@@ -83,8 +83,7 @@ def main(config):
     scaler = amp.GradScaler()
 
     if config.TRAIN.AUTO_RESUME:
-        resume_file = auto_resume_helper(config.OUTPUT, logger)
-        if resume_file:
+        if resume_file := auto_resume_helper(config.OUTPUT, logger):
             if config.MODEL.RESUME:
                 logger.warning(f"auto-resume changing resume file from {config.MODEL.RESUME} to {resume_file}")
             config.defrost()
@@ -108,7 +107,7 @@ def main(config):
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    logger.info('Training time {}'.format(total_time_str))
+    logger.info(f'Training time {total_time_str}')
 
 
 def train_one_epoch(config, model, data_loader, optimizer, epoch, lr_scheduler, scaler):
